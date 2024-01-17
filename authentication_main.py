@@ -8,6 +8,8 @@ import jwt
 import datetime
 import secrets
 import os
+from config import AZURE_STORAGE_CONNECTION_STRING
+
 
 app = Flask(__name__)
 secret_key = secrets.token_hex(16)
@@ -32,18 +34,41 @@ conn_pool = mysql.connector.pooling.MySQLConnectionPool(pool_name="mypool",pool_
 def get_db_connection():
     return conn_pool.get_connection()
 
-@app.route('/signup', methods=['POST'])
-def signup():
+
+OMR_SCANNING_APP_ID = "omr_scanner_app"  
+BOOK_SCANNING_APP_ID = "book_scanner_app"
+CLIENT_ID="necun"
+
+@app.route('/signup_book', methods=['POST'])
+def signup_book():
+    return signup_common(BOOK_SCANNING_APP_ID,CLIENT_ID)
+
+@app.route('/signup_omr', methods=['POST'])
+def signup_omr():
+    return signup_common(OMR_SCANNING_APP_ID,CLIENT_ID)
+
+
+def signup_common(application_id,client_id):
     data = request.json
+
+    required_fields = ['fullname', 'username', 'password', 'email', 'phone_number']
+    missing_fields = [field for field in required_fields if field not in data or not data[field]]
+    
+    if missing_fields:
+        return jsonify({'message': 'Missing fields', 'missing': missing_fields}), 400
+    
+    fullname = data['fullname']
     username = data['username']
     password = generate_password_hash(data['password'])
+    email = data['email']
+    phone_number = data['phone_number']
     
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
-        query = "INSERT INTO users (username, password) VALUES (%s, %s)"
-        cursor.execute(query, (username, password))
+        query = "INSERT INTO users (client_id,application_id,fullname, username, password, email, phone_number) VALUES (%s,%s,%s, %s, %s, %s, %s)"
+        cursor.execute(query, (client_id,application_id,fullname, username, password, email, phone_number)) 
         conn.commit()
     except mysql.connector.Error as err:
         print("Error:", err)
@@ -54,6 +79,12 @@ def signup():
 
     token = jwt.encode({'username': username, 'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=30)}, app.config['SECRET_KEY'])
     return jsonify({'message': 'User created successfully', 'token': token}), 201
+
+
+
+
+
+
 
 @app.route('/signin', methods=['POST'])
 def signin():
@@ -80,6 +111,12 @@ def signin():
     finally:
         cursor.close()
         conn.close()
+
+
+
+
+
+
 
 @app.route('/upload_image', methods=['POST'])
 def upload_image():
