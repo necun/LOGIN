@@ -60,6 +60,8 @@ def get_db_connection():
 @app.route('/user/signup', methods=['POST'])
 def signup_common():
     data = request.json
+    print("Headers Received:", request.headers)
+
 
     required_fields = ['fullname', 'username', 'password', 'email', 'phone_number']
     missing_fields = [field for field in required_fields if field not in data or not data[field]]
@@ -67,9 +69,9 @@ def signup_common():
     if missing_fields:
         return jsonify({'message': 'Missing fields', 'missing': missing_fields}), 400
     
-    if 'application_id' in request.headers and 'client_id' in request.headers:
-        application_id = request.headers['application_id']
-        client_id = request.headers['client_id']
+    if 'Application' in request.headers and 'Clientid' in request.headers:
+        application_id = request.headers['Application']
+        client_id = request.headers['Clientid']
     else:
         print("Required headers not found")
 
@@ -79,13 +81,14 @@ def signup_common():
     password = generate_password_hash(data['password'])
     email = data['email']
     phone_number = data['phone_number']
+    pic_url="aaa"
     
     conn = get_db_connection()
     cursor = conn.cursor()
 
     try:
-        query = "INSERT INTO users (client_id,application_id,fullname, username, password, email, phone_number) VALUES (%s,%s,%s, %s, %s, %s, %s)"
-        cursor.execute(query, (client_id,application_id,fullname, username, password, email, phone_number)) 
+        query = "INSERT INTO users (client_id,application_id,fullname, username, password, email, phone_number,pic_url) VALUES (%s,%s,%s, %s, %s, %s, %s,%s)"
+        cursor.execute(query, (client_id,application_id,fullname, username, password, email, phone_number,pic_url)) 
         conn.commit()
     except mysql.connector.Error as err:
         print("Error:", err)
