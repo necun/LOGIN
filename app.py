@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify,render_template
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from azure.storage.blob import BlobServiceClient
@@ -9,6 +9,7 @@ import datetime
 import secrets
 import os
 from functools import wraps
+from redis import Redis
 
 
 def token_required(f):
@@ -49,6 +50,11 @@ conn = {
     'password': 'Nikhil1234$',
     'database': 'data1'
 }
+
+REDIS_HOST = 'localhost'
+REDIS_PORT = 6379
+REDIS_DB = 0
+redis_client = Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
 
 # Create a connection pool
 conn_pool = mysql.connector.pooling.MySQLConnectionPool(pool_name="mypool",pool_size=5,**conn)
@@ -116,6 +122,7 @@ def signin():
 
         if user_record and check_password_hash(user_record[0], password):
             token = jwt.encode({'username': username, 'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=30)}, app.config['SECRET_KEY'])
+            redis_client.setex(token, 1800, username)
             return jsonify({'message': 'Login successful', 'token': token}), 200
         else:
             return jsonify({'message': 'Invalid username or password'}), 401
@@ -173,6 +180,85 @@ def upload_to_azure_blob(file_stream, file_name):
 def protected_route(current_user):
     print(current_user)
     return jsonify({'message': 'This is a protected route accessible only with a valid token.'})
+
+
+@app.route('/user/forgot_password', methods=['POST'] )
+def forgot_password():
+    email = request.json.get('email')
+    if not email:
+        return jsonify({'message':'Email is required'}), 400
+    
+    conn = get_db_connection()
+    cursor = conn.cursor(buffered=True)
+
+    try:
+        cursor.execute("SELECT user_id FROM users WHERE email = %s", (email,))
+        user = cursor.fetchone()
+        if not user:
+            return jsonify({'message':'user not found'}), 404
+        
+        reset_token = secrets.token_hex(16)
+        print(reset_token)
+
+        cursor.execute("UPDATE users SET reset_token = %s WHERE user_id=%s", (reset_token, user[0]))
+        conn.commit()
+
+        reset_url = f"http://120:0:0:1:5000/reset_password/{reset_token}"
+
+
+    #need to add email integration
+        return jsonify({'message':'password reset link has been sent to your mail'})
+    except mysql.connector.Error as err:
+        return jsonify({'message':'Database error', 'error': str(err)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/reset_password/<token>')
+def reset_password(token):
+    conn=get_db_connection()
+    cursor=conn.cursor(buffered=True)
+
+    try:
+        cursor.execute("SELECT user_id FROM users WHERE reset_token = %s",(token,))
+        if cursor.fetchone():
+            return render_template('reset_password.html',token=token)
+        else:
+            return jsonify({'message':'Invalid or expired token'}), 400
+        
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/update_password', methods=['POST'])
+def update_password():
+    token=request.form.get('token')
+    new_password=request.form.get('password')
+    confirm_password=request.form.get('confirm_password')
+
+    if new_password != confirm_password:
+        return jsonify({'message':'passwords do not match'}), 400
+    
+    conn=get_db_connection()
+    cursor=conn.cursor(buffered=True)
+
+    try:
+        cursor.execute("SELECT user_id FROM users WHERE reset_token = %s", (token,))
+        user = cursor.fetchone()
+
+        if user:
+            hashed_password=generate_password_hash(new_password)
+            cursor.execute("UPDATE users SET password =%s, reset_token=NULL WHERE user_id=%s",(hashed_password, user[0]))
+            conn.commit()
+            return jsonify({'message':'password has been upodated successfully'}), 200
+        else:
+            return jsonify({'message':'Invalid or expired token'}), 400
+    finally:
+        cursor.close()
+        conn.close()
+
+
+
 
 if __name__ == '__main__':
     app.run(debug=True)
